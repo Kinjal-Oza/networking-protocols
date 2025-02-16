@@ -1,283 +1,244 @@
 # Prometheus
 
 ## Overview
-Prometheus is an open-source systems monitoring and alerting toolkit, originally developed at SoundCloud. It features a multi-dimensional data model, a flexible query language (PromQL), autonomous server nodes, and a pull-based metrics collection approach.
+Prometheus is an open-source systems monitoring and alerting toolkit originally built at SoundCloud. It features a multi-dimensional data model, a flexible query language (PromQL), efficient time series database, and a modern alerting approach.
 
 ## Technical Details
 
-### Architecture Components
-
-1. **Core Components**
-   - Prometheus Server (Time Series Database)
-   - Exporters (Metrics Collection)
-   - Alertmanager (Alert Handling)
-   - Pushgateway (Short-lived Jobs)
-   - Service Discovery
-   - Web UI
+### Core Components
+1. **Time Series Database**
+   - Multi-dimensional data model
+   - Custom query language (PromQL)
+   - Pull-based metrics collection
+   - Local storage
+   - High availability options
 
 2. **Data Model**
-   ```
-   <metric_name>{<label_name>=<label_value>, ...} <value> [<timestamp>]
-   
-   # Example
-   http_requests_total{status="200", method="GET"} 1234 1234567890
+   - Metrics names
+   - Key-value pairs (labels)
+   - Timestamps
+   - Float64 values
+   - Four core metric types:
+     - Counter
+     - Gauge
+     - Histogram
+     - Summary
+
+3. **Service Discovery**
+   - File-based
+   - DNS
+   - Kubernetes
+   - Cloud platforms (AWS, GCP, Azure)
+   - Custom service discovery
+
+### PromQL (Prometheus Query Language)
+
+1. **Basic Queries**
+   ```promql
+   # Simple metric selection
+   http_requests_total
+
+   # With label matching
+   http_requests_total{status="200", method="GET"}
+
+   # Range vector
+   http_requests_total{status="200"}[5m]
+
+   # Rate calculation
+   rate(http_requests_total[5m])
    ```
 
-3. **Metric Types**
-   - Counter (Cumulative values)
-   - Gauge (Single numeric value)
-   - Histogram (Distribution of values)
-   - Summary (Similar to histogram with quantiles)
+2. **Aggregation Operations**
+   ```promql
+   # Sum by status
+   sum(http_requests_total) by (status)
+
+   # Average by instance
+   avg(node_cpu_seconds_total) by (instance)
+
+   # 95th percentile
+   histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))
+   ```
 
 ## Implementation
 
 ### Basic Configuration
 
-1. **Prometheus Server (prometheus.yml)**
+1. **prometheus.yml**
    ```yaml
    global:
      scrape_interval: 15s
      evaluation_interval: 15s
-     external_labels:
-       monitor: 'example-monitor'
 
    scrape_configs:
      - job_name: 'prometheus'
        static_configs:
          - targets: ['localhost:9090']
 
-     - job_name: 'node-exporter'
+     - job_name: 'node'
        static_configs:
          - targets: ['localhost:9100']
-
-   alerting:
-     alertmanagers:
-       - static_configs:
-         - targets: ['localhost:9093']
    ```
 
-2. **Alert Rules (alerts.yml)**
+2. **Alert Rules**
    ```yaml
    groups:
-   - name: example-alert-rules
+   - name: example
      rules:
      - alert: HighRequestLatency
-       expr: http_request_duration_seconds > 1
+       expr: http_request_duration_seconds > 0.5
        for: 10m
        labels:
          severity: warning
        annotations:
          summary: High request latency on {{ $labels.instance }}
-         description: Request latency is above 1s (current value: {{ $value }}s)
    ```
 
-### Metric Collection
+### Advanced Implementation
 
-1. **Custom Exporter Implementation**
+1. **Custom Metrics (Python)**
    ```python
-   from prometheus_client import start_http_server, Counter, Gauge
-   import random
-   import time
+   from prometheus_client import Counter, Gauge, Histogram, start_http_server
 
-   # Create metrics
-   REQUEST_COUNT = Counter(
-       'app_request_count',
-       'Application Request Count',
+   # Counter metric
+   requests_total = Counter(
+       'http_requests_total',
+       'Total HTTP requests',
        ['method', 'endpoint']
    )
 
-   REQUEST_LATENCY = Gauge(
-       'app_request_latency_seconds',
-       'Application Request Latency',
+   # Gauge metric
+   in_progress = Gauge(
+       'http_requests_in_progress',
+       'Number of in-progress HTTP requests'
+   )
+
+   # Histogram metric
+   request_duration = Histogram(
+       'http_request_duration_seconds',
+       'HTTP request duration in seconds',
        ['endpoint']
    )
 
-   def process_request(endpoint, method, latency):
-       """Process a request and record metrics"""
-       REQUEST_COUNT.labels(method=method, endpoint=endpoint).inc()
-       REQUEST_LATENCY.labels(endpoint=endpoint).set(latency)
-
-   if __name__ == '__main__':
-       # Start up the server to expose metrics
-       start_http_server(8000)
-       
-       # Generate some requests
-       while True:
-           process_request(
-               random.choice(['/home', '/metrics']),
-               random.choice(['GET', 'POST']),
-               random.random()
-           )
-           time.sleep(1)
+   # Start metrics server
+   start_http_server(8000)
    ```
 
-2. **Service Discovery Configuration**
+2. **High Availability Setup**
    ```yaml
+   global:
+     external_labels:
+       cluster: 'cluster1'
+       replica: 'replica1'
+
+   rule_files:
+     - 'rules/*.yml'
+
    scrape_configs:
-     - job_name: 'ec2-nodes'
-       ec2_sd_configs:
-         - region: us-west-2
-           access_key: <access_key>
-           secret_key: <secret_key>
-           port: 9100
-       
-       relabel_configs:
-         - source_labels: [__meta_ec2_tag_Name]
-           target_label: instance
-         - source_labels: [__meta_ec2_availability_zone]
-           target_label: zone
-   ```
+     - job_name: 'prometheus'
+       static_configs:
+         - targets: ['localhost:9090']
 
-### PromQL Examples
+   alerting:
+     alertmanagers:
+     - static_configs:
+       - targets: ['alertmanager:9093']
 
-1. **Basic Queries**
-   ```promql
-   # Rate of requests over 5 minutes
-   rate(http_requests_total[5m])
-
-   # 95th percentile latency
-   histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))
-
-   # Aggregate by label
-   sum by (status_code) (rate(http_requests_total[5m]))
-   ```
-
-2. **Advanced Queries**
-   ```promql
-   # Alert condition: Error rate > 5%
-   sum(rate(http_requests_total{status=~"5.."}[5m])) 
-     / 
-   sum(rate(http_requests_total[5m])) * 100 > 5
-
-   # CPU usage per instance
-   100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
-
-   # Memory usage
-   node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes
-   ```
-
-## Performance Optimization
-
-### Storage Optimization
-
-1. **TSDB Configuration**
-   ```yaml
    storage:
      tsdb:
-       path: /data
+       path: /prometheus
        retention.time: 15d
-       retention.size: 512GB
-       wal-compression: true
-       min-block-duration: 2h
-       max-block-duration: 24h
+     remote_write:
+       - url: "http://remote-write-endpoint/api/v1/write"
+     remote_read:
+       - url: "http://remote-read-endpoint/api/v1/read"
    ```
 
-2. **Query Optimization**
-   ```yaml
-   query:
-     max-samples: 50000000
-     timeout: 2m
-     max-concurrency: 20
-     lookback-delta: 5m
-   ```
+## Design Considerations
 
-### High Availability
+### Architecture Planning
+1. **Scalability**
+   - Federation
+   - Remote storage
+   - Sharding
+   - Load balancing
+   - High availability
 
-1. **Prometheus Federation**
-   ```yaml
-   scrape_configs:
-     - job_name: 'federate'
-       scrape_interval: 15s
-       honor_labels: true
-       metrics_path: '/federate'
-       params:
-         'match[]':
-           - '{job="prometheus"}'
-           - '{__name__=~"job:.*"}'
-       static_configs:
-         - targets:
-           - 'prometheus-1:9090'
-           - 'prometheus-2:9090'
-   ```
+2. **Data Retention**
+   - Storage requirements
+   - Retention period
+   - Compaction
+   - Remote storage options
+   - Backup strategy
 
-2. **Thanos Integration**
-   ```yaml
-   thanos:
-     image: thanosio/thanos:v0.24.0
-     args:
-       - "sidecar"
-       - "--tsdb.path=/prometheus"
-       - "--prometheus.url=http://localhost:9090"
-       - "--objstore.config-file=/etc/thanos/bucket.yml"
-   ```
+3. **Performance Optimization**
+   - Query optimization
+   - Recording rules
+   - Label cardinality
+   - Scrape intervals
+   - Resource allocation
+
+### Security Implementation
+1. **Access Control**
+   - TLS encryption
+   - Authentication
+   - Authorization
+   - Network segmentation
+   - Secure endpoints
+
+2. **Data Protection**
+   - Encryption at rest
+   - Secure communication
+   - Backup encryption
+   - Audit logging
+   - Access monitoring
 
 ## Best Practices
 
-### Security Considerations
+### Implementation Guidelines
+1. **Metric Design**
+   - Use clear naming conventions
+   - Keep cardinality under control
+   - Choose appropriate metric types
+   - Document metrics
+   - Use labels effectively
 
-1. **TLS Configuration**
-   ```yaml
-   tls_config:
-     cert_file: /etc/prometheus/cert.pem
-     key_file: /etc/prometheus/key.pem
-     client_auth_type: "RequireAndVerifyClientCert"
-     client_ca_file: /etc/prometheus/ca.pem
-   ```
+2. **Alerting Rules**
+   - Define clear alert conditions
+   - Avoid alert fatigue
+   - Set appropriate thresholds
+   - Include runbooks
+   - Use alert severity levels
 
-2. **Authentication**
-   ```yaml
-   basic_auth:
-     username: admin
-     password_file: /etc/prometheus/password.txt
-   ```
-
-### Monitoring Strategy
-
-1. **Alert Configuration**
-   ```yaml
-   alerting:
-     alert_relabel_configs:
-       - source_labels: [severity]
-         regex: warning|critical
-         action: keep
-     alertmanagers:
-       - scheme: https
-         static_configs:
-           - targets: ['alertmanager:9093']
-   ```
-
-2. **Recording Rules**
-   ```yaml
-   groups:
-     - name: example-rules
-       interval: 5m
-       rules:
-         - record: job:http_requests:rate5m
-           expr: sum by (job) (rate(http_requests_total[5m]))
-   ```
+3. **Operational Procedures**
+   - Regular backups
+   - Monitoring the monitor
+   - Capacity planning
+   - Performance tuning
+   - Incident response
 
 ## Interview Tips
 - Understand Prometheus architecture
 - Know metric types and use cases
 - Explain PromQL basics
-- Understand service discovery
+- Discuss scaling strategies
 - Be familiar with:
-  - Configuration options
+  - Service discovery
   - Alert management
   - Storage options
-  - High availability
+  - Integration patterns
 - Real-world scenarios:
-  - Container monitoring
-  - Application metrics
-  - Infrastructure monitoring
-  - Alert management
+  - Kubernetes monitoring
+  - Microservices observability
+  - Multi-datacenter setup
+  - Cloud-native monitoring
 - Best practices:
+  - Metric naming
+  - Alert design
   - Query optimization
-  - Storage configuration
-  - Alert configuration
-  - Federation setup
+  - High availability
 - Advanced concepts:
-  - Remote storage
   - Federation
-  - Service discovery
-  - Custom exporters 
+  - Remote storage
+  - Custom exporters
+  - Recording rules 
